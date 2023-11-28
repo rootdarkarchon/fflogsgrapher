@@ -196,7 +196,7 @@ public static class Program
             bar.BorderLineWidth = 0;
             for (int j = 0; j < results.Value.Length; j++)
             {
-                var txt = plt.AddText(JobAbbreviation[results.Key.Job], j, results.Value[j]);
+                var txt = plt.AddText(Math.Round(plots[results.Key][j], 0).ToString(), j, results.Value[j]);
                 txt.BackgroundFill = true;
                 txt.BackgroundColor = Color.FromArgb(128, Color.White);
                 txt.Color = Color.Black;
