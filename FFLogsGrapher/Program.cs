@@ -3,7 +3,6 @@ using FFLogsGrapher.Utils;
 using ScottPlot;
 using System.Drawing;
 using System.Drawing.Imaging;
-using System.Numerics;
 using System.Text.Json;
 
 namespace FFLogsGrapher;
@@ -43,7 +42,7 @@ public static class Program
             {
                 tag = log.Title.Split(new string[] { "#" }, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
                 if (string.IsNullOrEmpty(firstTag)) firstTag = tag;
-                if (tag != firstTag) continue;
+                //if (tag != firstTag) continue;
             }
             catch (Exception)
             {
@@ -139,21 +138,25 @@ public static class Program
             if (!Directory.Exists(plotDir)) Directory.CreateDirectory(plotDir);
 
             int height = 600;
-            int width = 1280;
+            int width = 1250;
             using var fightProgressPlot = DrawFightProgressPlot(width * 2, height / 2, grp.Value);
             using var percentageBmp = DrawPercentagePlot(width, height, grp.Value);
             using var timeBmp = DrawTimePlot(width, height, grp.Value);
             using var pullBmp = DrawLongestPullPlot(width, height, grp.Value);
             using var avgpullBmp = DrawAverageWeightedPullPlot(width, height, grp.Value);
-            using var lastFightBmp = DrawRdpsForFightPlot(width * 2, height, grp.Value.Last(), grp.Value.Count);
-            using Bitmap bmp = new Bitmap(width * 2, (int)(height * 3.5));
+            using var sessionRdpsBmp = DrawRdpsForFightPlot(width * 2, height, grp.Value.Last(), grp.Value.Count);
+            using var dpsPhaseBmp = DrawAverageRdpsOverallPerPhasePlot(width * 2, height, grp.Value);
+            using var dpsPhaseSessionBmp = DrawAverageRdpsPerPhasePlot(width * 2, height, grp.Value.Last(), grp.Value.Count);
+            using Bitmap bmp = new Bitmap(width * 2, (int)(height * 5.5));
             using var g = Graphics.FromImage(bmp);
             g.DrawImage(fightProgressPlot, 0, 0);
-            g.DrawImage(percentageBmp, 0, height / 2);
-            g.DrawImage(timeBmp, width, height / 2);
-            g.DrawImage(pullBmp, 0, height + height / 2);
-            g.DrawImage(avgpullBmp, width, height + height / 2);
-            g.DrawImage(lastFightBmp, 0, height * 2 + height / 2);
+            g.DrawImage(sessionRdpsBmp, 0, height / 2);
+            g.DrawImage(dpsPhaseSessionBmp, 0, height + height / 2);
+            g.DrawImage(percentageBmp, 0, height * 2 + height / 2);
+            g.DrawImage(timeBmp, width, height * 2 + height / 2);
+            g.DrawImage(pullBmp, 0, height * 3 + height / 2);
+            g.DrawImage(avgpullBmp, width, height * 3 + height / 2);
+            g.DrawImage(dpsPhaseBmp, 0, height * 4 + height / 2);
             bmp.Save(Path.Combine(plotDir, $"{grp.Key}-summary.png"), ImageFormat.Png);
         }
     }
@@ -185,7 +188,7 @@ public static class Program
         foreach (var results in finalResults.Reverse())
         {
             var bar = plt.AddBar(results.Value);
-            bar.Label = results.Key.Name;
+            bar.Label = results.Key.Name + " (" + results.Key.Job + ")";
             bar.Color = JobColors[results.Key.Job];
         }
 
@@ -193,6 +196,107 @@ public static class Program
         plt.SetAxisLimits(yMin: 0);
 
         return GeneratePlotBitmap(targetWidth, targetHeight, plt);
+    }
+
+    private static Bitmap DrawAverageRdpsPerPhasePlot(int targetWidth, int targetHeight, Report grp, int sessionNo)
+    {
+        var plt = new Plot(targetWidth, targetHeight);
+        Dictionary<(string, string), Dictionary<string, (double Average, double StdDev)>> plots
+            = GenerateAverageRdpsData(new() { grp }, grp.Players.Select(p => (p.Name, p.Job)).ToList());
+
+        plt.YLabel("RDPS");
+        plt.YAxis2.Line(false);
+        plt.XAxis2.Line(false);
+        plt.Layout(0, 0, 0, 0, 0);
+
+        var sortedPlayers = plots.OrderBy(p => JobOrder[p.Key.Item2]);
+        var sortedPhases = sortedPlayers.First().Value.OrderBy(p => PhaseLabels.Keys.ToList().IndexOf(p.Key)).ToList();
+        var barGroup = plt.AddBarGroups(sortedPlayers.Select(k => k.Key.Item1 + " (" + k.Key.Item2 + ")").ToArray(),
+            sortedPhases.Select(k => k.Key).ToArray(),
+            sortedPhases.Select(p => sortedPlayers.Select(k => k.Value.ContainsKey(p.Key) ? Math.Round(k.Value[p.Key].Average, 0) : 0).ToArray()).ToArray(),
+            sortedPhases.Select(p => sortedPlayers.Select(k => k.Value.ContainsKey(p.Key) ? k.Value[p.Key].StdDev : 0).ToArray()).ToArray());
+        for (int i = 0; i < barGroup.Length; i++)
+        {
+            barGroup[i].Color = PhaseColors[sortedPhases[i].Key];
+            barGroup[i].ShowValuesAboveBars = true;
+        }
+
+        plt.Title(grp.Fights.First().ZoneName + " RDPS per Phase [Session #" + sessionNo + "]");
+        plt.SetAxisLimits(yMin: 0);
+
+        return GeneratePlotBitmap(targetWidth, targetHeight, plt);
+    }
+
+    private static Bitmap DrawAverageRdpsOverallPerPhasePlot(int targetWidth, int targetHeight, List<Report> grp)
+    {
+        var plt = new Plot(targetWidth, targetHeight);
+        Dictionary<(string, string), Dictionary<string, (double Average, double StdDev)>> plots
+            = GenerateAverageRdpsData(grp, grp.Last().Players.Select(p => (p.Name, p.Job)).ToList());
+
+        plt.YLabel("RDPS");
+        plt.YAxis2.Line(false);
+        plt.XAxis2.Line(false);
+        plt.Layout(0, 0, 0, 0, 0);
+
+        var sortedPlayers = plots.OrderBy(p => JobOrder[p.Key.Item2]);
+        var sortedPhases = sortedPlayers.First().Value.OrderBy(p => PhaseLabels.Keys.ToList().IndexOf(p.Key)).ToList();
+        var barGroup = plt.AddBarGroups(sortedPlayers.Select(k => k.Key.Item1 + " (" + k.Key.Item2 + ")").ToArray(),
+            sortedPhases.Select(k => k.Key).ToArray(),
+            sortedPhases.Select(p => sortedPlayers.Select(k => Math.Round(k.Value[p.Key].Average, 0)).ToArray()).ToArray(),
+            sortedPhases.Select(p => sortedPlayers.Select(k => k.Value[p.Key].StdDev).ToArray()).ToArray());
+        for (int i = 0; i < barGroup.Length; i++)
+        {
+            barGroup[i].Color = PhaseColors[sortedPhases[i].Key];
+            barGroup[i].ShowValuesAboveBars = true;
+        }
+
+        plt.Title(grp.First().Fights.First().ZoneName + " RDPS per Phase [All Sessions]");
+        plt.SetAxisLimits(yMin: 0);
+
+        return GeneratePlotBitmap(targetWidth, targetHeight, plt);
+    }
+
+    private static Dictionary<(string Name, string Job), Dictionary<string, (double Average, double StdDev)>> GenerateAverageRdpsData(List<Report> grp, List<(string, string)> playerWithJobs)
+    {
+        var dict = new Dictionary<(string, string), Dictionary<string, (double Average, double StdDev)>>();
+
+        var players = grp.SelectMany(grp => grp.Players).Where(p => playerWithJobs.Contains((p.Name, p.Job))).GroupBy(g => (g.Name, g.Job));
+
+        foreach (var player in players)
+        {
+            try
+            {
+                dict[player.Key] = new();
+                var allDpsEntries = player.SelectMany(p => p.DpsEntries.Values).ToList();
+                Dictionary<string, List<double>> rdpsValues = new();
+
+                foreach (var entry in allDpsEntries)
+                {
+                    foreach (var kvp in entry)
+                    {
+                        if (!rdpsValues.TryGetValue(kvp.Key.Name, out var values))
+                        {
+                            rdpsValues[kvp.Key.Name] = values = new();
+                        }
+
+                        values.Add(kvp.Value.ActualRDPS);
+                    }
+                }
+
+                foreach (var value in rdpsValues)
+                {
+                    var avg = value.Value.Average();
+                    var stdDev = Math.Sqrt(value.Value.Average(v => Math.Pow(v - avg, 2)));
+                    dict[player.Key][value.Key] = (avg, stdDev);
+                }
+            }
+            catch (Exception ex)
+            {
+                continue;
+            }
+        }
+
+        return dict;
     }
 
     private static Bitmap DrawFightProgressPlot(int targetWidth, int targetHeight, List<Report> grp)
@@ -546,7 +650,23 @@ public static class Program
         {  "Intermission: Rewind!", ColorTranslator.FromHtml("#ffff00ff") },
         {  "P5: King Thordan II", ColorTranslator.FromHtml("#ff46bdc6") },
         {  "P6: Nidhogg and Hraesvelgr", ColorTranslator.FromHtml("#ffffe599") },
-        {  "P7: The Dragon King", ColorTranslator.FromHtml("#ff85200c") }
+        {  "P7: The Dragon King", ColorTranslator.FromHtml("#ff85200c") },
+        {  "P1: Living Liquid", ColorTranslator.FromHtml("#4385f5") },
+        {  "Intermission: Limit Cut", ColorTranslator.FromHtml("#e94335") },
+        {  "P2: Brute Justice and Cruise Chaser", ColorTranslator.FromHtml("#fcbc05") },
+        {  "Intermission: Temporal Stasis", ColorTranslator.FromHtml("#34a853") },
+        {  "P3: Alexander Prime", ColorTranslator.FromHtml("#ff6d02") },
+        {  "P4: Perfect Alexander", ColorTranslator.FromHtml("#47bdc6") },
+        {  "P1: Twintania", ColorTranslator.FromHtml("#4385f5") },
+        {  "P2: Nael deus Darnus", ColorTranslator.FromHtml("#e94335") },
+        {  "P3: Bahamut Prime", ColorTranslator.FromHtml("#fcbc05") },
+        {  "P4: Triple Threat", ColorTranslator.FromHtml("#34a853") },
+        {  "P5: Reborn!", ColorTranslator.FromHtml("#47bdc6") },
+        {  "Garuda", ColorTranslator.FromHtml("#4385f5") },
+        {  "Ifrit", ColorTranslator.FromHtml("#e94335") },
+        {  "Titan", ColorTranslator.FromHtml("#fcbc05") },
+        {  "Magitek Bits", ColorTranslator.FromHtml("#34a853") },
+        {  "The Ultima Weapon", ColorTranslator.FromHtml("#47bdc6") },
     };
 
     private static Dictionary<string, string> PhaseLabels = new(StringComparer.OrdinalIgnoreCase)
@@ -558,7 +678,23 @@ public static class Program
         {  "Intermission: Rewind!", "I1: Haurchefant" },
         {  "P5: King Thordan II", "P5: Dark Thordan" },
         {  "P6: Nidhogg and Hraesvelgr", "P6: Double Dragons" },
-        {  "P7: The Dragon King", "P7: Ultimate Thordan" }
+        {  "P7: The Dragon King", "P7: Ultimate Thordan" },
+        {  "P1: Living Liquid", "P1: Pepsiman" },
+        {  "Intermission: Limit Cut", "I1: Limit Cut" },
+        {  "P2: Brute Justice and Cruise Chaser", "P2: BJCC" },
+        {  "Intermission: Temporal Stasis", "I2: Statis" },
+        {  "P3: Alexander Prime", "P3: Alexander" },
+        {  "P4: Perfect Alexander", "P4: Perfect Alexander" },
+        {  "P1: Twintania", "P1: Twintania" },
+        {  "P2: Nael deus Darnus", "P2: Nael" },
+        {  "P3: Bahamut Prime", "P3: Bahamut" },
+        {  "P4: Triple Threat", "P4: Adds" },
+        {  "P5: Reborn!", "P5: Golden Bahamut" },
+        {  "Garuda", "P1: Garuda" },
+        {  "Ifrit", "P2: Ifrit" },
+        {  "Titan", "P3: Titan" },
+        {  "Magitek Bits", "I1: Magitek" },
+        {  "The Ultima Weapon", "P5: Ultima Weapon" },
     };
 
     private static Dictionary<string, string> PhaseLabelsAbbreviation = new(StringComparer.OrdinalIgnoreCase)
@@ -570,7 +706,23 @@ public static class Program
         {  "Intermission: Rewind!", "I1" },
         {  "P5: King Thordan II", "P5" },
         {  "P6: Nidhogg and Hraesvelgr", "P6" },
-        {  "P7: The Dragon King", "P7" }
+        {  "P7: The Dragon King", "P7" },
+        {  "P1: Living Liquid", "P1" },
+        {  "Intermission: Limit Cut", "I1" },
+        {  "P2: Brute Justice and Cruise Chaser", "P2" },
+        {  "Intermission: Temporal Stasis", "I2" },
+        {  "P3: Alexander Prime", "P3" },
+        {  "P4: Perfect Alexander", "P4" },
+        {  "P1: Twintania", "P1" },
+        {  "P2: Nael deus Darnus", "P2" },
+        {  "P3: Bahamut Prime", "P3" },
+        {  "P4: Triple Threat", "P4" },
+        {  "P5: Reborn!", "P5" },
+        {  "Garuda", "P1" },
+        {  "Ifrit", "P2" },
+        {  "Titan", "P3" },
+        {  "Magitek Bits", "I1" },
+        {  "The Ultima Weapon", "P5" },
     };
 
     private static Dictionary<string, int> JobOrder = new(StringComparer.OrdinalIgnoreCase)
