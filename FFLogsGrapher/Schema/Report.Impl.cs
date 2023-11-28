@@ -12,24 +12,33 @@ internal partial record Report
     public Dictionary<string, decimal> TimeSpentInPhase { get; set; }
     public int Boss { get; set; }
     public string Tag { get; set; }
+    public Dictionary<int, Player> PlayerDict { get; set; }
     public void SetValues(string tag)
     {
+        Fights.RemoveAll(t => Fights.Any(f => f != t &&
+            f.StartTimeOffset == t.StartTimeOffset
+            && Fights.IndexOf(f) < Fights.IndexOf(t)));
+
         foreach (var fight in Fights)
         {
             fight.SetValues(this);
         }
 
+        // remove everything that's not a player
+        Players.RemoveAll(f => f.Id > 9);
+        PlayerDict = Players.ToDictionary(g => g.Guid);
+
         Tag = tag;
         Boss = Phases.First().Boss;
         TotalTime = Fights.Last().EndTime - Fights.First().StartTime;
-        TimeInCombat = TimeSpan.FromTicks(Fights.Sum(f => f.CombatTime.Ticks));
+        TimeInCombat = TimeSpan.FromTicks(Fights.Sum(f => f.ActualCombatTime.Ticks));
         TimeNotInCombat = TotalTime - TimeInCombat;
-        Average = (decimal)Fights.Sum(f => f.CombatTime.TotalSeconds) / (decimal)Fights.Count;
-        WeightedAverage = Fights.Sum(f => f.Weight * (decimal)f.CombatTime.TotalSeconds) / Fights.Sum(f => f.Weight);
-        LongestPull = Fights.Max(f => f.CombatTime);
+        Average = (decimal)Fights.Sum(f => f.ActualCombatTime.TotalSeconds) / (decimal)Fights.Count;
+        WeightedAverage = Fights.Sum(f => f.Weight * (decimal)f.ActualCombatTime.TotalSeconds) / Fights.Sum(f => f.Weight);
+        LongestPull = Fights.Max(f => f.ActualCombatTime);
         PullsEndingInPhase = Fights.GroupBy(f => f.EndPhaseName)
             .OrderBy(f => Phases.First(p => p.Boss == f.First().Boss).Phases.IndexOf(f.First().EndPhaseName))
-            .ToDictionary(f => f.First().EndPhaseName, f => (f.Count(), (decimal)f.Sum(t => t.CombatTime.TotalSeconds), f.Sum(t => t.Weight)));
+            .ToDictionary(f => f.First().EndPhaseName, f => (f.Count(), (decimal)f.Sum(t => t.ActualCombatTime.TotalSeconds), f.Sum(t => t.Weight)));
         TimeSpentInPhase = Fights.SelectMany(f => f.Phases).GroupBy(f => f.Name)
             .OrderBy(f => Phases.First().Phases.IndexOf(f.First().Name))
             .ToDictionary(f => f.First().Name, f => ((decimal)f.Sum(t => t.Duration.TotalSeconds)));

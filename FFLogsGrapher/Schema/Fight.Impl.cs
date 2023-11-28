@@ -8,19 +8,19 @@ internal partial record Fight
     public decimal EndPhasePercentage { get; set; }
     public decimal EndFightPercentage { get; set; }
     public decimal Weight { get; set; }
+    public TimeSpan ActualCombatTime => (CombatTime == TimeSpan.Zero) ? EndTimeOffset - StartTimeOffset : CombatTime;
     public void SetValues(Report report)
     {
         StartTime = (report.Start + StartTimeOffset).ToLocalTime();
         EndTime = (report.Start + EndTimeOffset).ToLocalTime();
-        if (CombatTime == TimeSpan.Zero) CombatTime = EndTime - StartTime;
         if (report.Phases == null) return;
         EndPhaseName = report.Phases.Single(u => u.Boss == Boss).Phases[LastPhaseAsAbsoluteIndex];
         EndPhasePercentage = PhasePercentage / 100M;
         EndFightPercentage = FightPercentage / 100M;
         List<FightPhase> phasesToRemove = new();
 
-        var totalCombatTime = report.Fights.Sum(f => f.CombatTime.TotalMilliseconds);
-        Weight = (decimal)(CombatTime.TotalMilliseconds / totalCombatTime);
+        var totalCombatTime = report.Fights.Sum(f => f.ActualCombatTime.TotalMilliseconds);
+        Weight = (decimal)(ActualCombatTime.TotalMilliseconds / totalCombatTime);
 
         for (int i = 0; i < Phases.Count; i++)
         {
@@ -35,7 +35,7 @@ internal partial record Fight
 
     public void Print()
     {
-        Console.WriteLine("PullId: {0}, {1}: Start: {2}, End: {3}, Duration: {4}", Id, ZoneName, StartTime.TimeOfDay, EndTime.TimeOfDay, CombatTime);
+        Console.WriteLine("PullId: {0}, {1}: Start: {2}, End: {3}, Duration: {4}", Id, ZoneName, StartTime.TimeOfDay, EndTime.TimeOfDay, ActualCombatTime);
         Console.WriteLine("\tEnded on: {0} ({1}%), Total {2}%, Weight: {3}", EndPhaseName, EndPhasePercentage, EndFightPercentage, Weight);
         foreach (var phase in Phases ?? new List<FightPhase>())
         {

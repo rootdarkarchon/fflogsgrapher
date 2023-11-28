@@ -6,6 +6,7 @@ internal partial record FightPhase
     public DateTime EndTime { get; set; }
     public TimeSpan Duration { get; set; }
     public string Name { get; set; }
+    public Dictionary<Player, DpsPlayerEntry> DpsPlayerEntries { get; set; }
     public void SetTime(Report report, Fight fight, FightPhase? nextPhase)
     {
         StartTime = report.Start.ToLocalTime() + StartTimeOffset;
