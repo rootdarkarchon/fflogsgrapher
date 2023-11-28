@@ -15,16 +15,18 @@ public static class Program
 
         HttpClient client = new HttpClient();
 
-        // todo get guild, server, region from input/config
-        var guild = Uri.EscapeDataString("");
-        var server = Uri.EscapeDataString("");
-        var region = Uri.EscapeDataString("");
+        var settings = JsonSerializer.Deserialize<Settings>(File.ReadAllText("settings.json"))!;
 
-        var guildDataPath = Path.Combine(dataDir.FullName, $"{guild}-{server}-{region}");
+        // todo get guild, server, region from input/config
+        var guild = Uri.EscapeDataString(settings.Guild);
+        var server = Uri.EscapeDataString(settings.Server);
+        var region = Uri.EscapeDataString(settings.Region);
+
+        var guildDataPath = Path.Combine(dataDir.FullName, $"{settings.Guild}-{settings.Server}-{settings.Region}");
         if (!Directory.Exists(guildDataPath)) Directory.CreateDirectory(guildDataPath);
 
         // todo get apikey from input/config
-        var apikey = "";
+        var apikey = settings.ApiKey;
         var response = await client.GetStringAsync($"https://www.fflogs.com:443/v1/reports/guild/{guild}/{server}/{region}?api_key={apikey}");
 
         JsonSerializerOptions options = new();
@@ -42,7 +44,7 @@ public static class Program
             {
                 tag = log.Title.Split(new string[] { "#" }, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
                 if (string.IsNullOrEmpty(firstTag)) firstTag = tag;
-                //if (tag != firstTag) continue;
+                if (settings.CreateOnlyLatest && tag != firstTag) continue;
             }
             catch (Exception)
             {
@@ -88,28 +90,28 @@ public static class Program
                 CancellationTokenSource cts = new();
 
                 await Parallel.ForEachAsync(report.Fights,
-                     new ParallelOptions()
-                     {
-                         MaxDegreeOfParallelism = 4,
-                         CancellationToken = cts.Token
-                     },
-                     async (fight, token) =>
-                {
-                    foreach (var phase in fight.Phases)
+                    new ParallelOptions()
                     {
-                        var phaseStart = (int)phase.StartTimeOffset.TotalMilliseconds;
-                        var phaseEnd = (int)(phaseStart + phase.Duration.TotalMilliseconds);
-                        var dpsDataFileName = $"dps-{fight.Id}-{phase.Id}.json";
-                        var dpsDataFile = Path.Combine(reportFightsFolder, dpsDataFileName);
-                        if (!File.Exists(dpsDataFile))
+                        MaxDegreeOfParallelism = 4,
+                        CancellationToken = cts.Token
+                    },
+                    async (fight, token) =>
+                    {
+                        foreach (var phase in fight.Phases)
                         {
-                            var reportJson = await client.GetStringAsync($"https://www.fflogs.com:443/v1/report/tables/damage-done/{log.Id}?start={phaseStart}&end={phaseEnd}&api_key={apikey}", token);
-                            File.WriteAllText(dpsDataFile, reportJson);
-                            Console.WriteLine("Downloaded {0} Fight {1} Phase {2}", log.Id, fight.Id, phase.Id);
-                            await Task.Delay(TimeSpan.FromSeconds(1));
+                            var phaseStart = (int)phase.StartTimeOffset.TotalMilliseconds;
+                            var phaseEnd = (int)(phaseStart + phase.Duration.TotalMilliseconds);
+                            var dpsDataFileName = $"dps-{fight.Id}-{phase.Id}.json";
+                            var dpsDataFile = Path.Combine(reportFightsFolder, dpsDataFileName);
+                            if (!File.Exists(dpsDataFile))
+                            {
+                                var reportJson = await client.GetStringAsync($"https://www.fflogs.com:443/v1/report/tables/damage-done/{log.Id}?start={phaseStart}&end={phaseEnd}&api_key={apikey}", token);
+                                File.WriteAllText(dpsDataFile, reportJson);
+                                Console.WriteLine("Downloaded {0} Fight {1} Phase {2}", log.Id, fight.Id, phase.Id);
+                                await Task.Delay(TimeSpan.FromSeconds(0.75));
+                            }
                         }
-                    }
-                });
+                    });
 
                 foreach (var fight in report.Fights)
                 {
@@ -139,18 +141,20 @@ public static class Program
 
             int height = 600;
             int width = 1250;
-            using var fightProgressPlot = DrawFightProgressPlot(width * 2, height / 2, grp.Value);
+            using var fightProgressPlot = DrawFightProgressTimePlot(width * 2, height / 2, grp.Value);
             using var percentageBmp = DrawPercentagePlot(width, height, grp.Value);
             using var timeBmp = DrawTimePlot(width, height, grp.Value);
             using var pullBmp = DrawLongestPullPlot(width, height, grp.Value);
+            using var timeSpentBmp = DrawTimeSpentPlot(width, height, grp.Value);
             using var avgpullBmp = DrawAverageWeightedPullPlot(width, height, grp.Value);
-            using var sessionRdpsBmp = DrawRdpsForFightPlot(width * 2, height, grp.Value.Last(), grp.Value.Count);
+            using var sessionRdpsBmp = DrawRdpsForFightPlot(width, height, grp.Value.Last(), grp.Value.Count);
             using var dpsPhaseBmp = DrawAverageRdpsOverallPerPhasePlot(width * 2, height, grp.Value);
             using var dpsPhaseSessionBmp = DrawAverageRdpsPerPhasePlot(width * 2, height, grp.Value.Last(), grp.Value.Count);
             using Bitmap bmp = new Bitmap(width * 2, (int)(height * 5.5));
             using var g = Graphics.FromImage(bmp);
             g.DrawImage(fightProgressPlot, 0, 0);
             g.DrawImage(sessionRdpsBmp, 0, height / 2);
+            g.DrawImage(timeSpentBmp, width, height / 2);
             g.DrawImage(dpsPhaseSessionBmp, 0, height + height / 2);
             g.DrawImage(percentageBmp, 0, height * 2 + height / 2);
             g.DrawImage(timeBmp, width, height * 2 + height / 2);
@@ -173,7 +177,6 @@ public static class Program
         plt.XAxis.ManualTickSpacing(1);
         plt.Layout(0, 0, 0, 0, 0);
 
-        int i = 0;
         double[] lastValues = new double[plots.First().Value.Count];
         Dictionary<(string Name, string Job), double[]> finalResults = new();
         foreach (var player in plots)
@@ -183,19 +186,29 @@ public static class Program
         }
 
         plt.XTicks(Enumerable.Range(0, grp.Fights.Count)
-            .Select(i => (i + 1) + " [" + PhaseLabelsAbbreviation[grp.Fights[i].EndPhaseName] + "]").ToArray());
+            .Select(i => (i + 1) + Environment.NewLine + "[" + PhaseLabelsAbbreviation[grp.Fights[i].EndPhaseName] + "]").ToArray());
 
         foreach (var results in finalResults.Reverse())
         {
             var bar = plt.AddBar(results.Value);
-            bar.Label = results.Key.Name + " (" + results.Key.Job + ")";
+            bar.Label = AbbreviateName(results.Key.Name) + " (" + results.Key.Job + ")";
             bar.Color = JobColors[results.Key.Job];
+            bar.BorderLineWidth = 0;
+            for (int j = 0; j < results.Value.Length; j++)
+            {
+                var txt = plt.AddText(JobAbbreviation[results.Key.Job], j, results.Value[j]);
+                txt.BackgroundFill = true;
+                txt.BackgroundColor = Color.FromArgb(128, Color.White);
+                txt.Color = Color.Black;
+                txt.Alignment = Alignment.UpperCenter;
+                txt.PixelOffsetY = bar.BorderLineWidth - 1;
+            }
         }
 
         plt.Title(grp.Fights.First().ZoneName + " RDPS per Pull [Session #" + sessionNo + "]");
         plt.SetAxisLimits(yMin: 0);
 
-        return GeneratePlotBitmap(targetWidth, targetHeight, plt);
+        return GeneratePlotBitmap(targetWidth, targetHeight, plt, reverseLegend: false);
     }
 
     private static Bitmap DrawAverageRdpsPerPhasePlot(int targetWidth, int targetHeight, Report grp, int sessionNo)
@@ -211,20 +224,21 @@ public static class Program
 
         var sortedPlayers = plots.OrderBy(p => JobOrder[p.Key.Item2]);
         var sortedPhases = sortedPlayers.First().Value.OrderBy(p => PhaseLabels.Keys.ToList().IndexOf(p.Key)).ToList();
-        var barGroup = plt.AddBarGroups(sortedPlayers.Select(k => k.Key.Item1 + " (" + k.Key.Item2 + ")").ToArray(),
-            sortedPhases.Select(k => k.Key).ToArray(),
+        var barGroup = plt.AddBarGroups(sortedPlayers.Select(k => AbbreviateName(k.Key.Item1) + " (" + k.Key.Item2 + ")").ToArray(),
+            sortedPhases.Select(k => PhaseLabels[k.Key]).ToArray(),
             sortedPhases.Select(p => sortedPlayers.Select(k => k.Value.ContainsKey(p.Key) ? Math.Round(k.Value[p.Key].Average, 0) : 0).ToArray()).ToArray(),
             sortedPhases.Select(p => sortedPlayers.Select(k => k.Value.ContainsKey(p.Key) ? k.Value[p.Key].StdDev : 0).ToArray()).ToArray());
         for (int i = 0; i < barGroup.Length; i++)
         {
             barGroup[i].Color = PhaseColors[sortedPhases[i].Key];
             barGroup[i].ShowValuesAboveBars = true;
+            barGroup[i].BorderLineWidth = 0;
         }
 
         plt.Title(grp.Fights.First().ZoneName + " RDPS per Phase [Session #" + sessionNo + "]");
         plt.SetAxisLimits(yMin: 0);
 
-        return GeneratePlotBitmap(targetWidth, targetHeight, plt);
+        return GeneratePlotBitmap(targetWidth, targetHeight, plt, reverseLegend: false);
     }
 
     private static Bitmap DrawAverageRdpsOverallPerPhasePlot(int targetWidth, int targetHeight, List<Report> grp)
@@ -240,63 +254,21 @@ public static class Program
 
         var sortedPlayers = plots.OrderBy(p => JobOrder[p.Key.Item2]);
         var sortedPhases = sortedPlayers.First().Value.OrderBy(p => PhaseLabels.Keys.ToList().IndexOf(p.Key)).ToList();
-        var barGroup = plt.AddBarGroups(sortedPlayers.Select(k => k.Key.Item1 + " (" + k.Key.Item2 + ")").ToArray(),
-            sortedPhases.Select(k => k.Key).ToArray(),
+        var barGroup = plt.AddBarGroups(sortedPlayers.Select(k => AbbreviateName(k.Key.Item1) + " (" + k.Key.Item2 + ")").ToArray(),
+            sortedPhases.Select(k => PhaseLabels[k.Key]).ToArray(),
             sortedPhases.Select(p => sortedPlayers.Select(k => Math.Round(k.Value[p.Key].Average, 0)).ToArray()).ToArray(),
             sortedPhases.Select(p => sortedPlayers.Select(k => k.Value[p.Key].StdDev).ToArray()).ToArray());
         for (int i = 0; i < barGroup.Length; i++)
         {
             barGroup[i].Color = PhaseColors[sortedPhases[i].Key];
             barGroup[i].ShowValuesAboveBars = true;
+            barGroup[i].BorderLineWidth = 0;
         }
 
         plt.Title(grp.First().Fights.First().ZoneName + " RDPS per Phase [All Sessions]");
         plt.SetAxisLimits(yMin: 0);
 
-        return GeneratePlotBitmap(targetWidth, targetHeight, plt);
-    }
-
-    private static Dictionary<(string Name, string Job), Dictionary<string, (double Average, double StdDev)>> GenerateAverageRdpsData(List<Report> grp, List<(string, string)> playerWithJobs)
-    {
-        var dict = new Dictionary<(string, string), Dictionary<string, (double Average, double StdDev)>>();
-
-        var players = grp.SelectMany(grp => grp.Players).Where(p => playerWithJobs.Contains((p.Name, p.Job))).GroupBy(g => (g.Name, g.Job));
-
-        foreach (var player in players)
-        {
-            try
-            {
-                dict[player.Key] = new();
-                var allDpsEntries = player.SelectMany(p => p.DpsEntries.Values).ToList();
-                Dictionary<string, List<double>> rdpsValues = new();
-
-                foreach (var entry in allDpsEntries)
-                {
-                    foreach (var kvp in entry)
-                    {
-                        if (!rdpsValues.TryGetValue(kvp.Key.Name, out var values))
-                        {
-                            rdpsValues[kvp.Key.Name] = values = new();
-                        }
-
-                        values.Add(kvp.Value.ActualRDPS);
-                    }
-                }
-
-                foreach (var value in rdpsValues)
-                {
-                    var avg = value.Value.Average();
-                    var stdDev = Math.Sqrt(value.Value.Average(v => Math.Pow(v - avg, 2)));
-                    dict[player.Key][value.Key] = (avg, stdDev);
-                }
-            }
-            catch (Exception ex)
-            {
-                continue;
-            }
-        }
-
-        return dict;
+        return GeneratePlotBitmap(targetWidth, targetHeight, plt, reverseLegend: false);
     }
 
     private static Bitmap DrawFightProgressPlot(int targetWidth, int targetHeight, List<Report> grp)
@@ -341,6 +313,63 @@ public static class Program
             + grp.Sum(g => g.Fights.Count) + " -- Best Pull: Session " + sessionNo + ", Pull " + pullIdx + ": " + bestPull.EndPhaseName
             + (bestPull.Kill ? " (KILL)" : " (" + bestPull.EndPhasePercentage + "%)"));
         plt.SetAxisLimits(xMin: 0, xMax: plots.Sum(f => f.Length), yMin: 0, yMax: 100);
+
+        return GeneratePlotBitmap(targetWidth, targetHeight, plt, false);
+    }
+
+    private static Bitmap DrawFightProgressTimePlot(int targetWidth, int targetHeight, List<Report> grp)
+    {
+        var plt = new Plot(targetWidth, targetHeight);
+        var phases = grp.First().Phases.First(f => f.Boss == grp.First().Fights.First().Boss).Phases;
+        var plots = GenerateFightProgressPlotDataByHour(grp);
+
+        plt.YLabel("Fight %");
+        plt.XLabel("Seconds");
+        plt.XAxis.Line(true);
+        var tickSpacing = Math.Ceiling(plots.Last().X.Last() / 10f / 1000) * 1000;
+        plt.XAxis.ManualTickSpacing(tickSpacing);
+        plt.YAxis.ManualTickSpacing(25);
+        plt.XAxis2.Line(false);
+        plt.YAxis.Line(true);
+        plt.YAxis2.Line(false);
+        plt.Layout(0, 0, 0, 0, 0);
+
+        int i = 1;
+        foreach (var entry in plots)
+        {
+            var plotIdx = plots.IndexOf(entry);
+            bool hasNext = plotIdx != plots.Count() - 1;
+            var entryX = hasNext ? entry.X.Concat(new[] { plots[plotIdx + 1].X.First() }).ToArray() : entry.X;
+            var entryY = hasNext ? entry.Y.Concat(new[] { plots[plotIdx + 1].Y.First() }).ToArray() : entry.Y;
+            var signal = plt.AddSignalXY(entryX, entryY);
+            signal.FillBelow();
+            signal.Label = "Session " + i++;
+            signal.MarkerShape = MarkerShape.none;
+        }
+
+        var bestSession = grp.OrderBy(g => g.Fights.Select(f => f.EndFightPercentage).Min()).ThenBy(f => f.Start).First();
+        var sessionNo = grp.IndexOf(bestSession) + 1;
+
+        var bestPull = bestSession.Fights.OrderBy(f => f.EndFightPercentage).First();
+        var pullIdx = bestSession.Fights.IndexOf(bestPull) + 1;
+
+        var bestXVal = plots[sessionNo - 1].X[pullIdx - 1];
+        var bestYVal = plots[sessionNo - 1].Y[pullIdx - 1];
+        var text = plt.AddText("Best Pull", bestXVal, bestYVal);
+        text.Color = Color.Black;
+        text.BackgroundColor = Color.FromArgb(128, Color.White);
+        text.BackgroundFill = true;
+        text.Alignment = Alignment.LowerRight;
+        var horizLine = plt.AddLine(0, bestYVal, bestXVal, bestYVal, Color.FromArgb(192, Color.DarkGray));
+        horizLine.LineStyle = LineStyle.Dash;
+        var vertLine = plt.AddLine(bestXVal, 0, bestXVal, bestYVal, Color.FromArgb(192, Color.DarkGray));
+        vertLine.LineStyle = LineStyle.Dash;
+        plt.AddPoint(bestXVal, bestYVal, Color.Black, 5, MarkerShape.filledDiamond);
+
+        plt.Title(grp.First().Fights.First().ZoneName + " Progress (in Time) -- Total Pulls: "
+            + grp.Sum(g => g.Fights.Count) + " -- Best Pull: Session " + sessionNo + ", Pull " + pullIdx + ": " + bestPull.EndPhaseName
+            + (bestPull.Kill ? " (KILL)" : " (" + bestPull.EndPhasePercentage + "%)"));
+        plt.SetAxisLimits(xMin: 0, xMax: plots.Last().X.Last(), yMin: 0, yMax: 100);
 
         return GeneratePlotBitmap(targetWidth, targetHeight, plt, false);
     }
@@ -422,6 +451,49 @@ public static class Program
 
         plt.Title(grp.First().Fights.First().ZoneName + " Average Weighted Pulltime");
         plt.SetAxisLimits(yMin: 0, yMax: tickSpacing * 4 + tickSpacing * 4 / 100);
+
+        return GeneratePlotBitmap(targetWidth, targetHeight, plt);
+    }
+
+    private static Bitmap DrawTimeSpentPlot(int targetWidth, int targetHeight, List<Report> grp)
+    {
+        var plt = new Plot(targetWidth, targetHeight);
+
+        var phases = grp.First().Phases.First(f => f.Boss == grp.First().Fights.First().Boss).Phases;
+        Dictionary<string, double[]> plots = GenerateTimeSpentPlotData(grp, phases);
+
+        plt.XTicks(Enumerable.Range(1, grp.Count()).Select(k => k.ToString()).ToArray());
+        plt.YLabel("Seconds");
+        plt.XLabel("Session");
+        plt.XAxis.Line(true);
+        var tickSpacing = Math.Ceiling(plots.Last().Value.Max() / 4f / 500) * 500;
+        plt.XAxis2.Line(false);
+        plt.YAxis.Line(false);
+        plt.YAxis2.Line(false);
+
+        plt.Layout(0, 0, 0, 0, 0);
+        double? barWidth = null;
+        foreach (var item in plots.Reverse())
+        {
+            var bar = plt.AddBar(item.Value);
+            barWidth ??= bar.BarWidth;
+            if (barWidth != null) bar.BarWidth = barWidth.Value;
+            if (!PhaseLabelsAbbreviation.TryGetValue(item.Key, out string? label))
+            {
+                label = item.Key;
+            }
+            bar.Label = label;
+            bar.BorderLineWidth = 0;
+            bar.BorderColor = Color.Transparent;
+
+            if (PhaseColors.TryGetValue(item.Key, out var color))
+            {
+                bar.Color = color;
+            }
+        }
+
+        plt.Title(grp.First().Fights.First().ZoneName + " Time Spent In Phases");
+        plt.SetAxisLimits(yMin: 0);
 
         return GeneratePlotBitmap(targetWidth, targetHeight, plt);
     }
@@ -508,7 +580,7 @@ public static class Program
         return GeneratePlotBitmap(targetWidth, targetHeight, plt);
     }
 
-    private static Bitmap GeneratePlotBitmap(int targetWidth, int targetHeight, Plot plt, bool includeLegend = true)
+    private static Bitmap GeneratePlotBitmap(int targetWidth, int targetHeight, Plot plt, bool includeLegend = true, bool reverseLegend = true)
     {
         var padding = 10;
         if (includeLegend)
@@ -516,7 +588,7 @@ public static class Program
             var legend = plt.Legend(false);
             legend.Orientation = Orientation.Horizontal;
             legend.Padding = 0;
-            legend.ReverseOrder = true;
+            legend.ReverseOrder = reverseLegend;
             legend.OutlineColor = Color.Transparent;
             legend.IsDetached = true;
         }
@@ -631,6 +703,69 @@ public static class Program
         return grp.Select(g => g.Fights).Select(k => k.Select(f => (double)f.EndFightPercentage).ToArray()).ToList();
     }
 
+    private static Dictionary<string, double[]> GenerateTimeSpentPlotData(List<Report> grp, List<string> phases)
+    {
+        phases.Add("OOC");
+
+        Dictionary<int, Dictionary<string, double>> dataSet = new();
+
+        int id = 1;
+        foreach (var report in grp)
+        {
+            dataSet[id] = new();
+            foreach (var ph in phases)
+            {
+                dataSet[id][ph] = 0;
+            }
+
+            var ending = report.TimeSpentInPhase;
+            foreach (var time in ending)
+            {
+                dataSet[id][time.Key] = (double)time.Value;
+            }
+
+            dataSet[id]["OOC"] = report.TimeNotInCombat.TotalSeconds;
+            id++;
+        }
+
+        Dictionary<string, double[]> plots = new();
+        foreach (var ph in phases)
+        {
+            var barValues = dataSet.Values.Select(k => k[ph]);
+            plots[ph] = barValues.ToArray();
+            var prevLabel = phases.IndexOf(ph) - 1;
+            if (prevLabel >= 0)
+            {
+                plots[ph] = plots[ph].Zip(plots[phases.ElementAt(prevLabel)], (x, y) => x + y).ToArray();
+            }
+        }
+
+        return plots;
+    }
+
+    private static List<(double[] X, double[] Y)> GenerateFightProgressPlotDataByHour(List<Report> grp)
+    {
+        List<(double[] X, double[] Y)> result = new();
+        double xPos = 0;
+
+        foreach (var report in grp)
+        {
+            List<(double x, double y)> values = new();
+
+            foreach (var fight in report.Fights)
+            {
+                var x = xPos + fight.ActualCombatTime.TotalSeconds;
+                var y = (double)fight.EndFightPercentage;
+                values.Add((x, y));
+                xPos = x;
+            }
+
+            result.Add((values.Select(v => v.x).ToArray(), values.Select(v => v.y).ToArray()));
+        }
+
+        return result;
+    }
+
     private static double[] GenerateLongestPullData(List<Report> grp, List<string> phases)
     {
         return grp.Select(v => Math.Round(v.LongestPull.TotalSeconds, 0, MidpointRounding.AwayFromZero)).ToArray();
@@ -639,6 +774,49 @@ public static class Program
     private static double[] GenerateAverageWeightedPullData(List<Report> grp, List<string> phases)
     {
         return grp.Select(v => Math.Round((double)v.WeightedAverage, 0, MidpointRounding.AwayFromZero)).ToArray();
+    }
+
+    private static Dictionary<(string Name, string Job), Dictionary<string, (double Average, double StdDev)>> GenerateAverageRdpsData(List<Report> grp, List<(string, string)> playerWithJobs)
+    {
+        var dict = new Dictionary<(string, string), Dictionary<string, (double Average, double StdDev)>>();
+
+        var players = grp.SelectMany(grp => grp.Players).Where(p => playerWithJobs.Contains((p.Name, p.Job))).GroupBy(g => (g.Name, g.Job));
+
+        foreach (var player in players)
+        {
+            try
+            {
+                dict[player.Key] = new();
+                var allDpsEntries = player.SelectMany(p => p.DpsEntries.Values).ToList();
+                Dictionary<string, List<double>> rdpsValues = new();
+
+                foreach (var entry in allDpsEntries)
+                {
+                    foreach (var kvp in entry)
+                    {
+                        if (!rdpsValues.TryGetValue(kvp.Key.Name, out var values))
+                        {
+                            rdpsValues[kvp.Key.Name] = values = new();
+                        }
+
+                        values.Add(kvp.Value.ActualRDPS);
+                    }
+                }
+
+                foreach (var value in rdpsValues)
+                {
+                    var avg = value.Value.Average();
+                    var stdDev = Math.Sqrt(value.Value.Average(v => Math.Pow(v - avg, 2)));
+                    dict[player.Key][value.Key] = (avg, stdDev);
+                }
+            }
+            catch (Exception ex)
+            {
+                continue;
+            }
+        }
+
+        return dict;
     }
 
     private static Dictionary<string, Color> PhaseColors = new(StringComparer.OrdinalIgnoreCase)
@@ -667,6 +845,7 @@ public static class Program
         {  "Titan", ColorTranslator.FromHtml("#fcbc05") },
         {  "Magitek Bits", ColorTranslator.FromHtml("#34a853") },
         {  "The Ultima Weapon", ColorTranslator.FromHtml("#47bdc6") },
+        {  "OOC", ColorTranslator.FromHtml("#ababab") }
     };
 
     private static Dictionary<string, string> PhaseLabels = new(StringComparer.OrdinalIgnoreCase)
@@ -695,6 +874,7 @@ public static class Program
         {  "Titan", "P3: Titan" },
         {  "Magitek Bits", "I1: Magitek" },
         {  "The Ultima Weapon", "P5: Ultima Weapon" },
+        {  "OOC", "Not in Combat" }
     };
 
     private static Dictionary<string, string> PhaseLabelsAbbreviation = new(StringComparer.OrdinalIgnoreCase)
@@ -723,6 +903,7 @@ public static class Program
         {  "Titan", "P3" },
         {  "Magitek Bits", "I1" },
         {  "The Ultima Weapon", "P5" },
+        {  "OOC", "OOC" }
     };
 
     private static Dictionary<string, int> JobOrder = new(StringComparer.OrdinalIgnoreCase)
@@ -748,6 +929,29 @@ public static class Program
         { "BlackMage", 18 }
     };
 
+    private static Dictionary<string, string> JobAbbreviation = new(StringComparer.OrdinalIgnoreCase)
+    {
+        { "Warrior", "WAR" },
+        { "Paladin", "PLD" },
+        { "DarkKnight", "DRK" },
+        { "Gunbreaker", "GNB" },
+        { "WhiteMage", "WHM" },
+        { "Astrologician", "AST" },
+        { "Sage", "SGE" },
+        { "Scholar", "SCH" },
+        { "Samurai", "SAM" },
+        { "Ninja", "NIN" },
+        { "Dragoon", "DRG" },
+        { "Monk", "MNK" },
+        { "Reaper", "RPR" },
+        { "Bard", "BRD" },
+        { "Dancer", "DNC" },
+        { "Machinist", "MCH" },
+        { "Summoner", "SMN" },
+        { "RedMage", "RDM" },
+        { "BlackMage", "BLM" }
+    };
+
     private static Dictionary<string, Color> JobColors = new()
     {
         { "Warrior", ColorTranslator.FromHtml("#cf2621") },
@@ -770,4 +974,10 @@ public static class Program
         { "RedMage", ColorTranslator.FromHtml("#e87b7b") },
         { "BlackMage", ColorTranslator.FromHtml("#a579d6") }
     };
+
+    private static string AbbreviateName(string name)
+    {
+        var split = name.Split(" ");
+        return split[0][0] + ". " + split[1][0] + ".";
+    }
 }

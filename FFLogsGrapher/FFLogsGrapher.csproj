@@ -11,4 +11,10 @@
     <PackageReference Include="ScottPlot" Version="4.1.68" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="settings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
