@@ -25,7 +25,7 @@ internal partial record Report
         }
 
         // remove everything that's not a player
-        Players.RemoveAll(f => f.Id > 9);
+        Players.RemoveAll(f => string.IsNullOrEmpty(f.Server));
         PlayerDict = Players.ToDictionary(g => g.Guid);
 
         Tag = tag;

@@ -14,7 +14,7 @@ internal partial record Dps
 {
     public void SetValues(Report report, Fight fight, FightPhase fightPhase)
     {
-        PlayerEntries.RemoveAll(e => e.Id > 9);
+        PlayerEntries.RemoveAll(e => !report.Players.Select(e => e.Guid).Contains(e.Guid));
 
         foreach (var entry in PlayerEntries)
         {

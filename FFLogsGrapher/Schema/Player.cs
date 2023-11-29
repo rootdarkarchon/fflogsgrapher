@@ -12,6 +12,8 @@ internal partial record Player
     public int Guid { get; set; }
     [JsonPropertyName("type")]
     public string Job { get; set; }
+    [JsonPropertyName("server")]
+    public string Server { get; set; }
 }
 
 internal partial record Player
