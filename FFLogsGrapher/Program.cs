@@ -827,8 +827,22 @@ public static class Program
                 foreach (var value in rdpsValues)
                 {
                     var avg = value.Value.Average();
-                    var stdDev = Math.Sqrt(value.Value.Average(v => Math.Pow(v - avg, 2)));
-                    dict[player.Key][value.Key] = (avg, stdDev);
+                    var med = value.Value.OrderBy(v => v).Skip(value.Value.Count / 2).First();
+                    var stdDev = Math.Sqrt(value.Value.Sum(v => Math.Pow(v - avg, 2)) / value.Value.Count);
+                    var ci = avg + 0.95 * (stdDev / Math.Sqrt(value.Value.Count));
+                    var se = stdDev / Math.Sqrt(value.Value.Count);
+
+                    dict[player.Key][value.Key] = (avg, (ci - avg) * 2);
+                }
+            }
+            catch (Exception ex)
+            {
+                continue;
+            }
+        }
+
+        return dict;
+    }
                 }
             }
             catch (Exception ex)
