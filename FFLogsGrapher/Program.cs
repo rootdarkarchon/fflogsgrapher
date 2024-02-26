@@ -843,16 +843,6 @@ public static class Program
 
         return dict;
     }
-                }
-            }
-            catch (Exception ex)
-            {
-                continue;
-            }
-        }
-
-        return dict;
-    }
 
     private static Dictionary<string, TimeSpan> PhaseActiveEnrageTimes = new()
     {
