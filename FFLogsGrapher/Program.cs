@@ -256,8 +256,22 @@ public static class Program
         var sortedPhases = sortedPlayers.First().Value.OrderBy(p => PhaseLabels.Keys.ToList().IndexOf(p.Key)).ToList();
         var barGroup = plt.AddBarGroups(sortedPlayers.Select(k => AbbreviateName(k.Key.Item1) + " (" + k.Key.Item2 + ")").ToArray(),
             sortedPhases.Select(k => PhaseLabels[k.Key]).ToArray(),
-            sortedPhases.Select(p => sortedPlayers.Select(k => Math.Round(k.Value[p.Key].Average, 0)).ToArray()).ToArray(),
-            sortedPhases.Select(p => sortedPlayers.Select(k => k.Value[p.Key].StdDev).ToArray()).ToArray());
+            sortedPhases.Select(p => sortedPlayers.Select(k =>
+            {
+                if (k.Value.TryGetValue(p.Key, out var val))
+                {
+                    return Math.Round(val.Average, 0);
+                }
+                return 0;
+            }).ToArray()).ToArray(),
+            sortedPhases.Select(p => sortedPlayers.Select(k =>
+            {
+                if (k.Value.TryGetValue(p.Key, out var val))
+                {
+                    return val.StdDev;
+                }
+                return 0;
+            }).ToArray()).ToArray());
         for (int i = 0; i < barGroup.Length; i++)
         {
             barGroup[i].Color = PhaseColors[sortedPhases[i].Key];
@@ -689,9 +703,11 @@ public static class Program
 
         foreach (var fight in report.Fights)
         {
-            foreach (var player in report.Players.OrderBy(p => JobOrder[p.Job]).Reverse())
+            var list = report.Players.OrderBy(p => JobOrder[p.Job]).GroupBy(b => (b.Name, b.Job)).Reverse();
+            foreach (var player in list)
             {
-                output[(player.Name, player.Job)].Add(player.GetRdpsForFight(fight));
+                double maxDps = player.Max(p => p.GetRdpsForFight(fight));
+                output[(player.Key.Name, player.Key.Job)].Add(maxDps);
             }
         }
 
@@ -787,13 +803,18 @@ public static class Program
             try
             {
                 dict[player.Key] = new();
-                var allDpsEntries = player.SelectMany(p => p.DpsEntries.Values).ToList();
+                var allDpsEntries = player.Where(p => p.DpsEntries != null).SelectMany(p => p.DpsEntries.Values).ToList();
                 Dictionary<string, List<double>> rdpsValues = new();
 
                 foreach (var entry in allDpsEntries)
                 {
                     foreach (var kvp in entry)
                     {
+                        bool addEntry = kvp.Key.HasNextPhase
+                            || (PhaseActiveEnrageTimes.TryGetValue(kvp.Key.Name, out TimeSpan enrageTime)
+                                && enrageTime == default ? true : (Math.Abs(kvp.Key.Duration.TotalSeconds - enrageTime.TotalSeconds) < 1));
+                        if (!addEntry) continue;
+
                         if (!rdpsValues.TryGetValue(kvp.Key.Name, out var values))
                         {
                             rdpsValues[kvp.Key.Name] = values = new();
@@ -818,6 +839,12 @@ public static class Program
 
         return dict;
     }
+
+    private static Dictionary<string, TimeSpan> PhaseActiveEnrageTimes = new()
+    {
+        { "P1: Omega", TimeSpan.FromSeconds(133.4) },
+        { "P2: Omega-M/F", TimeSpan.FromSeconds(151.1) },
+    };
 
     private static Dictionary<string, Color> PhaseColors = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -845,6 +872,12 @@ public static class Program
         {  "Titan", ColorTranslator.FromHtml("#fcbc05") },
         {  "Magitek Bits", ColorTranslator.FromHtml("#34a853") },
         {  "The Ultima Weapon", ColorTranslator.FromHtml("#47bdc6") },
+        { "P1: Omega", ColorTranslator.FromHtml("#ff4285f4") },
+        { "P2: Omega-M/F", ColorTranslator.FromHtml("#ffea4335") },
+        { "P3: Omega Reconfigured", ColorTranslator.FromHtml("#fffbbc04") },
+        { "P4: Blue Screen", ColorTranslator.FromHtml("#ff34a853") },
+        { "P5: Run: Dynamis", ColorTranslator.FromHtml("#47bdc6") },
+        { "P6: Alpha Omega", ColorTranslator.FromHtml("#ffffe599") },
         {  "OOC", ColorTranslator.FromHtml("#ababab") }
     };
 
@@ -874,6 +907,12 @@ public static class Program
         {  "Titan", "P3: Titan" },
         {  "Magitek Bits", "I1: Magitek" },
         {  "The Ultima Weapon", "P5: Ultima Weapon" },
+        { "P1: Omega", "P1: Omega" },
+        { "P2: Omega-M/F", "P2: Omega M/F" },
+        { "P3: Omega Reconfigured", "P3: Omega Reconfigured" },
+        { "P4: Blue Screen", "P4: Blue Screen" },
+        { "P5: Run: Dynamis", "P5: Run: Dynamis" },
+        { "P6: Alpha Omega", "P6: Alpha Omega" },
         {  "OOC", "Not in Combat" }
     };
 
@@ -903,6 +942,12 @@ public static class Program
         {  "Titan", "P3" },
         {  "Magitek Bits", "I1" },
         {  "The Ultima Weapon", "P5" },
+        { "P1: Omega", "P1" },
+        { "P2: Omega-M/F", "P2" },
+        { "P3: Omega Reconfigured", "P3" },
+        { "P4: Blue Screen", "P4" },
+        { "P5: Run: Dynamis", "P5" },
+        { "P6: Alpha Omega", "P6" },
         {  "OOC", "OOC" }
     };
 

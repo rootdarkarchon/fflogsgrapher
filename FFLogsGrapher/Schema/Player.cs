@@ -32,6 +32,8 @@ internal partial record Player
 
     public double GetRdpsForFight(Fight fight)
     {
+        if (DpsEntries is null) return 0;
+
         if (!DpsEntries.TryGetValue(fight, out var phases))
         {
             return 0;

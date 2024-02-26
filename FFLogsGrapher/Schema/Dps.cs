@@ -6,12 +6,14 @@ internal partial record Dps
 {
     [JsonPropertyName("totalTime")]
     public TimeSpan TotalTime { get; set; }
+    [JsonPropertyName("downtime")]
+    public TimeSpan DownTime { get; set; }
     [JsonPropertyName("entries")]
     public List<DpsPlayerEntry> PlayerEntries { get; set; }
 }
 
 internal partial record Dps
-{
+{ 
     public void SetValues(Report report, Fight fight, FightPhase fightPhase)
     {
         PlayerEntries.RemoveAll(e => !report.Players.Select(e => e.Guid).Contains(e.Guid));

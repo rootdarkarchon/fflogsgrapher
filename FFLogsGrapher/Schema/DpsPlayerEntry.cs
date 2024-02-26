@@ -35,8 +35,8 @@ internal partial record DpsPlayerEntry
 
     public void SetValues(Dps entry)
     {
-        ActualDPS = TotalDPS / entry.TotalTime.TotalSeconds;
-        ActualRDPS = TotalRDPS / entry.TotalTime.TotalSeconds;
-        ActualActiveTime = ActiveTime.TotalSeconds / entry.TotalTime.TotalSeconds;
+        ActualDPS = TotalDPS / (entry.TotalTime.TotalSeconds - entry.DownTime.TotalSeconds);
+        ActualRDPS = TotalRDPS / (entry.TotalTime.TotalSeconds - entry.DownTime.TotalSeconds);
+        ActualActiveTime = ActiveTime.TotalSeconds / (entry.TotalTime.TotalSeconds - entry.DownTime.TotalSeconds);
     }
 }
