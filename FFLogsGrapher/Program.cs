@@ -812,7 +812,7 @@ public static class Program
                     {
                         bool addEntry = kvp.Key.HasNextPhase
                             || (PhaseActiveEnrageTimes.TryGetValue(kvp.Key.Name, out TimeSpan enrageTime)
-                                && enrageTime == default ? true : (Math.Abs(kvp.Key.Duration.TotalSeconds - enrageTime.TotalSeconds) < 1));
+                                && enrageTime == default ? true : (Math.Abs(kvp.Key.Duration.TotalSeconds - enrageTime.TotalSeconds) < 5));
                         if (!addEntry) continue;
 
                         if (!rdpsValues.TryGetValue(kvp.Key.Name, out var values))
@@ -842,6 +842,14 @@ public static class Program
 
     private static Dictionary<string, TimeSpan> PhaseActiveEnrageTimes = new()
     {
+        { "P1: Adelphel, Grinnaux and Charibert", TimeSpan.FromSeconds(171.3) },
+        { "P2: King Thordan", TimeSpan.FromSeconds(194.7) },
+        { "P3: Nidhogg", TimeSpan.FromSeconds(126.3) },
+        { "P4: The Eyes", TimeSpan.FromSeconds(91.0) },
+        { "Intermission: Rewind!", TimeSpan.FromSeconds(87.0) },
+        { "P5: King Thordan II", TimeSpan.FromSeconds(178) },
+        { "P6: Nidhogg and Hraesvelgr", TimeSpan.FromSeconds(189.6) },
+        { "P7: The Dragon King", TimeSpan.FromSeconds(233.5) },
         { "P1: Omega", TimeSpan.FromSeconds(133.4) },
         { "P2: Omega-M/F", TimeSpan.FromSeconds(151.1) },
     };
@@ -907,7 +915,7 @@ public static class Program
         {  "Titan", "P3: Titan" },
         {  "Magitek Bits", "I1: Magitek" },
         {  "The Ultima Weapon", "P5: Ultima Weapon" },
-        { "P1: Omega", "P1: Omega" },
+        { "P1: Omega", "P1: Omega Mariokart" },
         { "P2: Omega-M/F", "P2: Omega M/F" },
         { "P3: Omega Reconfigured", "P3: Omega Reconfigured" },
         { "P4: Blue Screen", "P4: Blue Screen" },

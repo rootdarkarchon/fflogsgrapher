@@ -13,6 +13,6 @@ internal partial record FightPhase
         StartTime = report.Start.ToLocalTime() + StartTimeOffset;
         EndTime = report.Start.ToLocalTime() + (nextPhase == null ? fight.EndTimeOffset : nextPhase.StartTimeOffset);
         Duration = EndTime - StartTime;
-        HasNextPhase = nextPhase != null;
+        HasNextPhase = nextPhase != null || fight.Kill;
     }
 }
