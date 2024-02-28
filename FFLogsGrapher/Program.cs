@@ -856,6 +856,7 @@ public static class Program
         { "P7: The Dragon King", TimeSpan.FromSeconds(233.5) },
         { "P1: Omega", TimeSpan.FromSeconds(133.4) },
         { "P2: Omega-M/F", TimeSpan.FromSeconds(151.1) },
+        { "P3: Omega Reconfigured", TimeSpan.FromSeconds(190.1) },
     };
 
     private static Dictionary<string, Color> PhaseColors = new(StringComparer.OrdinalIgnoreCase)
